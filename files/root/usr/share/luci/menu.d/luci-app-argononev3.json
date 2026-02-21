@@ -1,0 +1,13 @@
+{
+    "admin/services/argononev3": {
+        "title": "Argon ONE V3 Fan",
+        "action": {
+            "type": "view",
+            "path": "argononev3"
+        },
+        "depends": {
+            "acl": [ "luci-app-argononev3" ],
+            "uci": { "argononev3": true }
+        }
+    }
+}
