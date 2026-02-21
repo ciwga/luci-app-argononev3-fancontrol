@@ -1,0 +1,4 @@
+config global 'config'
+    option enabled '1'
+    option mode 'auto'
+    option manual_speed '55'
