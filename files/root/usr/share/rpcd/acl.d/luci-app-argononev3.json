@@ -1,0 +1,21 @@
+{
+    "luci-app-argononev3": {
+        "description": "Grant UCI and RPC access for Argon ONE V3 Fan Control",
+        "read": {
+            "uci": [ "argononev3" ],
+            "file": {
+                "/sys/class/thermal/thermal_zone0/temp": [ "read" ],
+                "/sys/class/thermal/thermal_zone1/temp": [ "read" ],
+                "/sys/class/thermal/thermal_zone2/temp": [ "read" ],
+                "/sys/class/thermal/thermal_zone3/temp": [ "read" ],
+                "/var/run/argon_fan.status": [ "read" ]
+            },
+            "ubus": {
+                "service": [ "list" ]
+            }
+        },
+        "write": {
+            "uci": [ "argononev3" ]
+        }
+    }
+}
