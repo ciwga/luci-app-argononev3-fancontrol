@@ -1,0 +1,73 @@
+#!/bin/sh /etc/rc.common
+
+# ==============================================================================
+# FILE: /etc/init.d/argon_daemon
+# DESCRIPTION: Procd init script for Argon ONE V3 Fan Daemon
+# AUTHOR: ciwga
+#
+# USAGE:
+#   service argon_daemon start
+#   service argon_daemon enable
+# ==============================================================================
+
+# Execution order (Start late to ensure I2C modules are loaded)
+START=99
+STOP=10
+
+# Ensure the shell script uses the strict environment we defined
+USE_PROCD=1
+PROG=/usr/bin/argon_fan_control.sh
+
+# Function: start_service
+# Description: Definitions for procd to supervise the daemon.
+start_service() {
+    # NEW: Securely load and parse the UCI configuration
+    config_load "argononev3"
+    local enabled
+    
+    # Check if the user has disabled the service via the web interface
+    config_get_bool enabled "config" "enabled" 1
+    if [ "$enabled" -eq 0 ]; then
+        logger -t argon_init -p daemon.info "[INFO] Service disabled in UCI configuration. Halting execution."
+        return 0
+    fi
+
+    # Check if executable exists and is executable
+    if [ ! -x "$PROG" ]; then
+        logger -t argon_init -p daemon.err "[ERROR] Executable $PROG not found or not executable."
+        return 1
+    fi
+
+    procd_open_instance
+    
+    # Executable path
+    procd_set_param command "$PROG"
+
+    # Respawn settings:
+    # If it crashes, wait 3600s, infinite retries (0), max 5 seconds within restart window
+    procd_set_param respawn 3600 5 0
+
+    # Output redirection (stdout/stderr to syslog)
+    # The script uses 'logger', but this catches unhandled errors/crashes.
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+
+    # Close instance definition
+    procd_close_instance
+}
+
+# Function: service_triggers
+# Description: Reload service on specific system events automatically.
+service_triggers() {
+    # Keeps backwards compatibility to trigger self-reloads.
+    procd_add_reload_trigger "argon_daemon"
+    
+    # Securely hooks into OpenWrt's native UCI configuration system.
+    procd_add_reload_trigger "argononev3"
+}
+
+# Function: stop_service
+# Description: procd handles SIGTERM automatically, but we can log specific actions here.
+stop_service() {
+    logger -t argon_init -p daemon.info "[INFO] Stopping Argon ONE Fan Service..."
+}
