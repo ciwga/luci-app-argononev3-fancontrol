@@ -32,6 +32,7 @@ CRIT_COUNTER=0
 # Global Log Level (Updated dynamically in the loop)
 GLOBAL_LOG_LEVEL=1
 
+# Function to get exact uptime safely
 get_uptime() {
     local up
     if [ -r /proc/uptime ]; then
@@ -42,6 +43,7 @@ get_uptime() {
     fi
 }
 
+# Standardized logging functions
 log_info() { 
     if [ "$GLOBAL_LOG_LEVEL" = "1" ]; then
         logger -t argon_daemon -p daemon.notice "[INFO] $1"
@@ -50,10 +52,12 @@ log_info() {
 log_err() { logger -t argon_daemon -p daemon.err "[ERROR] $1"; }
 log_crit() { logger -t argon_daemon -p daemon.crit "[CRITICAL] $1"; }
 
+# Privilege verification
 check_root() {
     if [ "$(id -u)" -ne 0 ]; then exit 1; fi
 }
 
+# Atomic locking mechanism to prevent race conditions
 acquire_lock() {
     if mkdir "$LOCK_DIR" >/dev/null 2>&1; then
         echo $$ > "$PID_FILE"
@@ -71,6 +75,7 @@ acquire_lock() {
     fi
 }
 
+# Automatically determine the correct CPU thermal zone
 find_thermal_source() {
     local zone type_val found_path=""
     for zone in /sys/class/thermal/thermal_zone*; do
@@ -89,6 +94,7 @@ find_thermal_source() {
     return 0
 }
 
+# Automatically detect the active I2C bus for the Argon MCU
 find_i2c_bus() {
     local dev bus_num found
     for dev in /dev/i2c-*; do
@@ -100,6 +106,7 @@ find_i2c_bus() {
     return 1
 }
 
+# Wrapper for safe I2C register writes
 i2c_write() {
     local bus="$1" reg="$2" val="$3"
     if ! i2cset -y -f "$bus" "$CHIP_ADDR" "$reg" "$val" >/dev/null 2>&1; then
@@ -111,6 +118,7 @@ i2c_write() {
     fi
 }
 
+# Graceful exit handler
 cleanup() {
     set +e 
     if [ -n "${DETECTED_BUS:-}" ]; then i2c_write "$DETECTED_BUS" "$REG_FAN" "0x37"; fi
@@ -133,6 +141,7 @@ if [ -z "$THERMAL_ZONE_PATH" ] || [ -z "$DETECTED_BUS" ]; then
     exit 1
 fi
 
+# Initialize IPC status file safely
 printf '{"mode":"loading","level":0,"temp":0,"speed":0,"active_speed":0,"night":0}\n' > "${STATUS_FILE}.tmp"
 mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
 
@@ -142,42 +151,49 @@ i2c_write "$DETECTED_BUS" "$REG_FAN" "0x00"
 
 LAST_WRITE_TIME=$(get_uptime)
 
+# ==============================================================================
+# CONFIGURATION INGESTION (Memory & CPU Optimization)
+# Readings are done ONCE at startup. If UCI configuration changes, 
+# OpenWrt procd will cleanly restart this daemon via procd_add_reload_trigger.
+# This prevents thousands of subshells from spawning in the while loop.
+# ==============================================================================
+
+# General Settings
+UCI_MODE=$(uci -q get argononev3.config.mode || echo "auto")
+UCI_SPEED=$(uci -q get argononev3.config.manual_speed || echo "55")
+GLOBAL_LOG_LEVEL=$(uci -q get argononev3.config.log_level || echo "1")
+
+# Critical Shutdown Settings
+UCI_SHUTDOWN_EN=$(uci -q get argononev3.config.shutdown_enabled || echo "0")
+UCI_SHUTDOWN_TEMP=$(uci -q get argononev3.config.shutdown_temp || echo "85")
+
+# Dynamic Custom Temperature Curve & Hysteresis
+UCI_THRESH_HIGH=$(uci -q get argononev3.config.temp_high || echo "60")
+UCI_THRESH_MED=$(uci -q get argononev3.config.temp_med || echo "55")
+UCI_THRESH_LOW=$(uci -q get argononev3.config.temp_low || echo "45")
+UCI_THRESH_QUIET=$(uci -q get argononev3.config.temp_quiet || echo "40")
+DYNAMIC_HYST=$(uci -q get argononev3.config.hysteresis || echo "4")
+
+# Dynamic Fan Speeds
+UCI_SPEED_HIGH=$(uci -q get argononev3.config.speed_high || echo "100")
+UCI_SPEED_MED=$(uci -q get argononev3.config.speed_med || echo "55")
+UCI_SPEED_LOW=$(uci -q get argononev3.config.speed_low || echo "25")
+UCI_SPEED_QUIET=$(uci -q get argononev3.config.speed_quiet || echo "10")
+
+# Night Mode Settings
+UCI_NIGHT_EN=$(uci -q get argononev3.config.night_enabled || echo "0")
+UCI_NIGHT_START=$(uci -q get argononev3.config.night_start || echo "23")
+UCI_NIGHT_END=$(uci -q get argononev3.config.night_end || echo "07")
+UCI_NIGHT_MAX=$(uci -q get argononev3.config.night_max || echo "25")
+
+# Hex Conversions Pre-calculated
+HEX_HIGH=$(printf "0x%02x" "$UCI_SPEED_HIGH")
+HEX_MED=$(printf "0x%02x" "$UCI_SPEED_MED")
+HEX_LOW=$(printf "0x%02x" "$UCI_SPEED_LOW")
+HEX_QUIET=$(printf "0x%02x" "$UCI_SPEED_QUIET")
+HEX_OFF="0x00"
+
 while true; do
-    # General Settings
-    UCI_MODE=$(uci -q get argononev3.config.mode || echo "auto")
-    UCI_SPEED=$(uci -q get argononev3.config.manual_speed || echo "55")
-    GLOBAL_LOG_LEVEL=$(uci -q get argononev3.config.log_level || echo "1")
-    
-    # Critical Shutdown Settings
-    UCI_SHUTDOWN_EN=$(uci -q get argononev3.config.shutdown_enabled || echo "0")
-    UCI_SHUTDOWN_TEMP=$(uci -q get argononev3.config.shutdown_temp || echo "85")
-
-    # Dynamic Custom Temperature Curve & Hysteresis
-    UCI_THRESH_HIGH=$(uci -q get argononev3.config.temp_high || echo "60")
-    UCI_THRESH_MED=$(uci -q get argononev3.config.temp_med || echo "55")
-    UCI_THRESH_LOW=$(uci -q get argononev3.config.temp_low || echo "45")
-    UCI_THRESH_QUIET=$(uci -q get argononev3.config.temp_quiet || echo "40")
-    DYNAMIC_HYST=$(uci -q get argononev3.config.hysteresis || echo "4")
-
-    # Dynamic Fan Speeds
-    UCI_SPEED_HIGH=$(uci -q get argononev3.config.speed_high || echo "100")
-    UCI_SPEED_MED=$(uci -q get argononev3.config.speed_med || echo "55")
-    UCI_SPEED_LOW=$(uci -q get argononev3.config.speed_low || echo "25")
-    UCI_SPEED_QUIET=$(uci -q get argononev3.config.speed_quiet || echo "10")
-
-    # Night Mode Settings
-    UCI_NIGHT_EN=$(uci -q get argononev3.config.night_enabled || echo "0")
-    UCI_NIGHT_START=$(uci -q get argononev3.config.night_start || echo "23")
-    UCI_NIGHT_END=$(uci -q get argononev3.config.night_end || echo "07")
-    UCI_NIGHT_MAX=$(uci -q get argononev3.config.night_max || echo "25")
-
-    # Hex Conversions
-    HEX_HIGH=$(printf "0x%02x" "$UCI_SPEED_HIGH")
-    HEX_MED=$(printf "0x%02x" "$UCI_SPEED_MED")
-    HEX_LOW=$(printf "0x%02x" "$UCI_SPEED_LOW")
-    HEX_QUIET=$(printf "0x%02x" "$UCI_SPEED_QUIET")
-    HEX_OFF="0x00"
-
     # Temperature Reading
     if read -r RAW_TEMP < "$THERMAL_ZONE_PATH" 2>/dev/null; then :; else RAW_TEMP="-1"; fi
 
@@ -192,12 +208,19 @@ while true; do
          if [ "$SENSOR_ERR_STATE" -eq 1 ]; then SENSOR_ERR_STATE=0; fi
     fi
 
-    # Night Mode Logic Calculation
+    # Night Mode Logic Calculation (Optimized: No awk/date subshell overhead)
     IS_NIGHT=0
     if [ "$UCI_NIGHT_EN" = "1" ]; then
-        CH=$(date +%H | awk '{print int($1)}')
-        NS=$(echo "$UCI_NIGHT_START" | awk '{print int($1)}')
-        NE=$(echo "$UCI_NIGHT_END" | awk '{print int($1)}')
+        CH=$(date +%H)
+        # Safely remove leading zeros to prevent octal arithmetic errors
+        CH=${CH#0} 
+        NS=${UCI_NIGHT_START#0}
+        NE=${UCI_NIGHT_END#0}
+        
+        # Fallback handling
+        [ -z "$CH" ] && CH=0
+        [ -z "$NS" ] && NS=0
+        [ -z "$NE" ] && NE=0
         
         if [ "$NS" -gt "$NE" ]; then
             if [ "$CH" -ge "$NS" ] || [ "$CH" -lt "$NE" ]; then IS_NIGHT=1; fi
@@ -287,6 +310,8 @@ while true; do
         fi
     fi
 
+    # Write IPC state file atomically to a memory-backed tmpfs (/var/run/) 
+    # to prevent partial reads by the LuCI JS frontend without degrading flash memory.
     printf '{"mode":"%s","level":%d,"temp":%d,"speed":%d,"active_speed":%d,"night":%d}\n' "$UCI_MODE" "${NEW_LEVEL:-4}" "$TEMP" "$UCI_SPEED" "$ACTIVE_SPEED" "$IS_NIGHT" > "${STATUS_FILE}.tmp"
     mv "${STATUS_FILE}.tmp" "$STATUS_FILE"
 

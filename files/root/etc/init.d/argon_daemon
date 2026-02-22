@@ -21,7 +21,7 @@ PROG=/usr/bin/argon_fan_control.sh
 # Function: start_service
 # Description: Definitions for procd to supervise the daemon.
 start_service() {
-    # NEW: Securely load and parse the UCI configuration
+    # Securely load and parse the UCI configuration
     config_load "argononev3"
     local enabled
     
@@ -62,8 +62,14 @@ service_triggers() {
     # Keeps backwards compatibility to trigger self-reloads.
     procd_add_reload_trigger "argon_daemon"
     
-    # Securely hooks into OpenWrt's native UCI configuration system.
+    # Hooks into OpenWrt's native UCI configuration system.
     procd_add_reload_trigger "argononev3"
+}
+
+# Function: reload_service
+# Description: Forces a hard restart when UCI config changes so the script reads the new values.
+reload_service() {
+    restart
 }
 
 # Function: stop_service
