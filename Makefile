@@ -2,14 +2,13 @@
 # FILE: Makefile
 # DESCRIPTION: OpenWrt Package Build Script for Argon ONE V3 Fan Control
 # AUTHOR: ciwga
-# VERSION: 1.0.0
 # ==============================================================================
 
 include $(TOPDIR)/rules.mk
 
 # Package Definitions
 PKG_NAME:=luci-app-argononev3-fancontrol
-PKG_VERSION:=1.0.0
+PKG_VERSION:=2.0.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=ciwga
@@ -49,6 +48,7 @@ endef
 define Package/luci-app-argononev3-fancontrol/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) ./files/root/usr/bin/argon_fan_control.sh $(1)/usr/bin/
+	$(INSTALL_BIN) ./files/root/usr/bin/argon_update.sh $(1)/usr/bin/
 	
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) ./files/root/etc/init.d/argon_daemon $(1)/etc/init.d/

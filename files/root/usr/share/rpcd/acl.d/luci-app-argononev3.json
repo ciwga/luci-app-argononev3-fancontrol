@@ -15,7 +15,10 @@
             }
         },
         "write": {
-            "uci": [ "argononev3" ]
+            "uci": [ "argononev3" ],
+            "file": {
+                "/usr/bin/argon_update.sh": [ "exec" ]
+            }
         }
     }
 }

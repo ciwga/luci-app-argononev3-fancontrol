@@ -53,6 +53,7 @@ return view.extend({
         s.tab('curve', _('Cooling Curve'), _('Dynamic temperature thresholds, fan speeds, and hysteresis.'));
         s.tab('night', _('Night Mode'), _('Quiet hours scheduling to limit fan noise.'));
         s.tab('safety', _('Safety'), _('Critical thermal shutdown protection.'));
+        s.tab('about', _('About & Updates'), _('Project information and software updates.'));
 
         // ==========================================
         // TAB 1: GENERAL
@@ -167,9 +168,70 @@ return view.extend({
         o.datatype = 'range(70, 95)';
         o.default = '85';
 
+        // ==========================================
+        // TAB 5: ABOUT & UPDATES
+        // ==========================================
+        o = s.taboption('about', form.DummyValue, '_about_info');
+        o.rawhtml = true;
+        o.cfgvalue = function() {
+            return '<div style="padding: 15px; background: #1e293b; border-radius: 6px; color: #f8fafc; border-left: 5px solid #10b981; margin-bottom: 20px;">' +
+                   '<h3 style="color: #f8fafc; margin-top: 0;">Argon ONE V3 Fan Control</h3>' +
+                   '<p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">A professional, production-grade LuCI interface and lightweight background daemon designed for securely managing the Argon ONE V3 cooling fan natively on OpenWrt without any resource bloat.</p>' +
+                   '<table style="width: 100%; max-width: 600px; font-size: 14px; margin-top: 15px;">' +
+                   '<tr><td style="padding: 4px 0; color: #94a3b8; width: 120px;"><b>Author:</b></td><td style="padding: 4px 0;">ciwga</td></tr>' +
+                   '<tr><td style="padding: 4px 0; color: #94a3b8;"><b>GitHub:</b></td><td style="padding: 4px 0;"><a href="https://github.com/ciwga/luci-app-argononev3-fancontrol" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: none;">ciwga/luci-app-argononev3-fancontrol</a></td></tr>' +
+                   '<tr><td style="padding: 4px 0; color: #94a3b8;"><b>License:</b></td><td style="padding: 4px 0;">MIT License</td></tr>' +
+                   '</table>' +
+                   '<hr style="border: 0; border-top: 1px solid #334155; margin: 20px 0;"/>' +
+                   '<div id="argon_update_container" style="display: flex; align-items: center;">' +
+                   '<button id="argon_update_btn" class="cbi-button cbi-button-apply" style="margin-right: 15px;">Check for Updates</button>' +
+                   '<span id="argon_update_status" style="font-size: 14px; font-weight: bold; color: #94a3b8;">Click to query GitHub for the latest release...</span>' +
+                   '</div>' +
+                   '</div>';
+        };
+
         var renderPromise = m.render();
 
         renderPromise.then(function(node) {
+            
+            // Bypass LuCI CSP: Attach the event listener programmatically after DOM render
+            var updateBtn = node.querySelector('#argon_update_btn');
+            if (updateBtn) {
+                updateBtn.addEventListener('click', function(ev) {
+                    ev.preventDefault();
+                    var statusEl = node.querySelector('#argon_update_status');
+                    statusEl.innerHTML = '<span style="color: #f59e0b;">Checking GitHub API...</span>';
+                    
+                    fetch('https://api.github.com/repos/ciwga/luci-app-argononev3-fancontrol/releases/latest')
+                    .then(function(res) { return res.json(); })
+                    .then(function(data) {
+                        var latestTag = data.tag_name || data.name;
+                        if(latestTag) {
+                            statusEl.innerHTML = '<span style="color: #10b981;">Latest release found: ' + latestTag + '</span>';
+                            if(confirm('An update check found GitHub release: ' + latestTag + '\n\nDo you want to download and install this update now?\n(The service will securely upgrade and restart automatically)')) {
+                                statusEl.innerHTML = '<span style="color: #c084fc;">Downloading and installing... Please wait ~30 seconds, then manually refresh the page.</span>';
+                                
+                                // Safely execute the restricted shell script using LuCI's fs module
+                                fs.exec('/usr/bin/argon_update.sh').then(function(res) {
+                                    if(res.code === 0) { 
+                                        statusEl.innerHTML = '<span style="color: #10b981;">Update Complete! Please refresh the page.</span>'; 
+                                    } else { 
+                                        statusEl.innerHTML = '<span style="color: #ef4444;">Update failed. Check system logs (logread).</span>'; 
+                                    }
+                                }).catch(function(e) { 
+                                    statusEl.innerHTML = '<span style="color: #ef4444;">Execution blocked by RPC/ACL policy.</span>'; 
+                                });
+                            }
+                        } else {
+                            statusEl.innerHTML = '<span style="color: #ef4444;">Could not parse latest release data.</span>';
+                        }
+                    })
+                    .catch(function(err) {
+                        statusEl.innerHTML = '<span style="color: #ef4444;">Network error. Cannot reach GitHub.</span>';
+                    });
+                });
+            }
+
             var updateDashboard = function() {
                 Promise.all([
                     callServiceList('argon_daemon').catch(function() { return {}; }),
