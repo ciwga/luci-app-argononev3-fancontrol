@@ -8,7 +8,10 @@
                 "/sys/class/thermal/thermal_zone1/temp": [ "read" ],
                 "/sys/class/thermal/thermal_zone2/temp": [ "read" ],
                 "/sys/class/thermal/thermal_zone3/temp": [ "read" ],
-                "/var/run/argon_fan.status": [ "read" ]
+                "/var/run/argon_fan.status": [ "read" ],
+                "/var/run/argon_fan.lock/pid": [ "read" ],
+                "/etc/argon_version": [ "read" ],
+                "/etc/config/argononev3": [ "read" ]
             },
             "ubus": {
                 "service": [ "list" ]
@@ -17,7 +20,9 @@
         "write": {
             "uci": [ "argononev3" ],
             "file": {
-                "/usr/bin/argon_update.sh": [ "exec" ]
+                "/usr/bin/argon_update.sh": [ "exec" ],
+                "/usr/bin/argon_fan_test.sh": [ "exec" ],
+                "/etc/init.d/argon_daemon": [ "exec" ]
             }
         }
     }
