@@ -1,38 +1,39 @@
 ---
-name: Bug report
-about: Create a report to help us improve
-title: ''
-labels: ''
+name: Bug Report
+about: Create a report to help us improve the Fan Control daemon or LuCI interface
+title: '[BUG] '
+labels: bug
 assignees: ''
-
 ---
 
-**Describe the bug**
+## 🐛 Bug Description
 A clear and concise description of what the bug is.
 
-**To Reproduce**
+## 🔄 Steps to Reproduce
 Steps to reproduce the behavior:
-1. Go to '...'
+1. Go to 'LuCI -> Services -> Argon ONE V3 Fan'
 2. Click on '....'
-3. Scroll down to '....'
+3. Run command '....'
 4. See error
 
-**Expected behavior**
+## 📉 Expected Behavior
 A clear and concise description of what you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+## 🖥️ Environment Data
+- **OpenWrt Version:** [e.g. 23.05.2]
+- **Raspberry Pi Model:** [e.g. Pi 5 8GB]
+- **Argon ONE Case Model:** [e.g. V3 M.2 NVMe]
+- **Package Version:** [e.g. v3.0.0]
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+## 📋 Logs
+Please provide the logs from the daemon. You can get these via SSH by running:
+```bash
+logread -e argon_
+```
+**Output:**
+```text
+[Paste your logs here]
+```
 
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
-
-**Additional context**
-Add any other context about the problem here.
+## 📸 Screenshots (Optional)
+If applicable, add screenshots of the LuCI interface to help explain your problem.
