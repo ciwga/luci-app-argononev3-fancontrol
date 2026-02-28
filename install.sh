@@ -25,68 +25,96 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${CYAN}>>> $1${NC}"; }
 
-# ------------------------------------------------------------------------------
-# INSTALLATION PROCESS
-# ------------------------------------------------------------------------------
-
 echo "========================================================"
-echo "   Argon ONE V3 Fan Control Installer (OpenWrt/RPi5)    "
+echo "   Argon ONE V3 Fan Control Installer                   "
+echo "   OpenWrt / Raspberry Pi 5                             "
 echo "========================================================"
 
-# 1. Check Root Privileges
 if [ "$(id -u)" -ne 0 ]; then
     log_err "This script must be run as root. Please log in as root and try again."
     exit 1
 fi
 
-# 2. Update and Install Dependencies
-log_step "Step 1: Installing System Dependencies"
-log_info "Updating opkg package lists..."
+# ==============================================================================
+# PHASE 0: PRE-INSTALL CLEANUP (Clean-Slate)
+# ==============================================================================
+log_step "Phase 0: Pre-Install Cleanup"
+
+if [ -f "/etc/init.d/argon_daemon" ]; then
+    log_info "Stopping existing installation..."
+    /etc/init.d/argon_daemon stop >/dev/null 2>&1 || true
+    /etc/init.d/argon_daemon disable >/dev/null 2>&1 || true
+fi
+
+killall -9 argon_fan_control.sh 2>/dev/null || true
+killall -9 argon_update.sh 2>/dev/null || true
+
+rm -f /var/run/argon_fan.status /var/run/argon_fan.status.tmp /var/run/argon_fan.lock/pid 2>/dev/null || true
+rmdir /var/run/argon_fan.lock 2>/dev/null || true
+rm -f /etc/argon_version /tmp/argon_update.ipk /tmp/argononev3_latest.ipk /tmp/argon_update_install.log 2>/dev/null || true
+rm -f /etc/config/argononev3-opkg /etc/config/argononev3.bak 2>/dev/null || true
+rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null || true
+
+# Fan off during upgrade window
+for dev in /dev/i2c-*; do
+    [ -e "$dev" ] || continue
+    bus="${dev##*-}"
+    if i2cdetect -y -r "$bus" 2>/dev/null | grep -q "1a"; then
+        i2cset -y -f "$bus" 0x1a 0x80 0x00 2>/dev/null || true
+        log_info "Fan MCU set to OFF on bus $bus."
+        break
+    fi
+done
+
+log_info "Cleanup complete."
+
+# ==============================================================================
+# STEP 1: DEPENDENCIES
+# ==============================================================================
+log_step "Step 1: Installing Dependencies"
 opkg update >/dev/null 2>&1
 
 if opkg install i2c-tools; then
-    log_info "Dependency 'i2c-tools' installed successfully."
+    log_info "'i2c-tools' ready."
 else
-    log_err "Failed to install 'i2c-tools'. Please check your internet connection."
+    log_err "Failed to install 'i2c-tools'."
     exit 1
 fi
 
-# 3. Fetch and Install the Latest IPK from GitHub Releases
-log_step "Step 2: Downloading the Latest Package"
-log_info "Querying GitHub API for the latest release..."
+# ==============================================================================
+# STEP 2: DOWNLOAD & INSTALL PACKAGE
+# ==============================================================================
+log_step "Step 2: Downloading Latest Package"
 
 API_URL="https://api.github.com/repos/$REPO_USER/$REPO_NAME/releases/latest"
+RELEASE_JSON=$(wget -qO- "$API_URL" 2>/dev/null) || { log_err "GitHub API unreachable."; exit 1; }
 
-DOWNLOAD_URL=$(wget -qO- "$API_URL" | sed -n 's/.*"browser_download_url": *"\([^"]*\.ipk\)".*/\1/p' | head -n 1)
+DOWNLOAD_URL=$(echo "$RELEASE_JSON" | sed -n 's/.*"browser_download_url": *"\([^"]*\.ipk\)".*/\1/p' | head -n 1)
+REMOTE_TAG=$(echo "$RELEASE_JSON" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
-    log_err "Failed to find the latest .ipk release URL."
-    log_err "Check if GitHub API is rate-limited or if the release contains the .ipk asset."
+    log_err "No .ipk found in latest release."
     exit 1
 fi
 
-log_info "Latest release found: $DOWNLOAD_URL"
+log_info "Latest: ${REMOTE_TAG:-unknown}"
 IPK_FILE="/tmp/argononev3_latest.ipk"
 
 if wget --no-check-certificate -q -O "$IPK_FILE" "$DOWNLOAD_URL"; then
-    log_info "Download complete. Installing the package via opkg..."
-    
-    # --force-maintainer: Overwrites existing config files with the new ones from the package.
-    # --force-overwrite: Forces overwriting of files owned by other packages if necessary.
+    log_info "Download complete."
     if opkg install --force-maintainer --force-overwrite "$IPK_FILE"; then
-        log_info "Package installed successfully (Configuration updated)."
+        log_info "Package installed."
     else
-        log_err "Package installation failed."
-        rm -f "$IPK_FILE"
-        exit 1
+        log_err "Installation failed."; rm -f "$IPK_FILE"; exit 1
     fi
     rm -f "$IPK_FILE"
 else
-    log_err "Failed to download the .ipk file."
-    exit 1
+    log_err "Download failed."; exit 1
 fi
 
-# 4. Configure /boot/config.txt for I2C
+# ==============================================================================
+# STEP 3: I2C HARDWARE CONFIG
+# ==============================================================================
 log_step "Step 3: Hardware Configuration (I2C)"
 CONFIG_FILE="/boot/config.txt"
 I2C_PARAM="dtparam=i2c_arm=on"
@@ -94,57 +122,49 @@ REBOOT_REQUIRED=0
 
 if [ -f "$CONFIG_FILE" ]; then
     if grep -q "^$I2C_PARAM" "$CONFIG_FILE"; then
-        log_info "I2C bus is already enabled in $CONFIG_FILE."
+        log_info "I2C already enabled."
     else
-        log_info "Enabling I2C support in boot configuration..."
-        
-        # Create a secure backup before modification
         cp "$CONFIG_FILE" "$CONFIG_FILE.bak"
-        log_info "Backup created at $CONFIG_FILE.bak"
-
-        # Safely append the configuration
         echo "" >> "$CONFIG_FILE"
-        echo "# Added automatically by Argon ONE Installer" >> "$CONFIG_FILE"
+        echo "# Added by Argon ONE Installer" >> "$CONFIG_FILE"
         echo "$I2C_PARAM" >> "$CONFIG_FILE"
-        log_info "I2C parameter successfully injected into config.txt."
-        
+        log_info "I2C enabled. Reboot required."
         REBOOT_REQUIRED=1
     fi
 else
-    log_warn "$CONFIG_FILE not found! You may need to enable the I2C bus manually depending on your firmware."
+    log_warn "$CONFIG_FILE not found. Enable I2C manually if needed."
 fi
 
-# 5. Clean up Ghost Processes and Start Service
+# ==============================================================================
+# STEP 4: SERVICE INIT
+# ==============================================================================
 log_step "Step 4: Service Initialization"
-log_info "Cleaning up legacy ghost processes and lock files..."
 
-# Graceful check for the init script before execution
-if [ -f "/etc/init.d/argon_daemon" ]; then
-    /etc/init.d/argon_daemon stop >/dev/null 2>&1 || true
-    /etc/init.d/argon_daemon enable
-else
-    log_err "Installation error: /etc/init.d/argon_daemon not found. The .ipk may not have installed correctly."
+if [ ! -f "/etc/init.d/argon_daemon" ]; then
+    log_err "/etc/init.d/argon_daemon missing. Install may be broken."
     exit 1
 fi
 
-killall -9 argon_fan_control.sh 2>/dev/null || true
-rm -f /var/run/argon_fan.status /var/run/argon_fan.lock/* 2>/dev/null || true
+if [ -f "/etc/argon_version" ]; then
+    log_info "Installed version: $(cat /etc/argon_version)"
+fi
 
-log_info "Restarting RPC daemon..."
 /etc/init.d/rpcd restart >/dev/null 2>&1 || true
+/etc/init.d/argon_daemon enable
 
 if [ "$REBOOT_REQUIRED" -eq 0 ]; then
     /etc/init.d/argon_daemon start
-    log_info "Daemon started successfully."
+    log_info "Daemon started."
 else
-    log_warn "Daemon enabled, but requires a system reboot to initialize the I2C bus."
+    log_warn "Daemon enabled but requires reboot for I2C bus."
 fi
 
 echo "========================================================"
-echo -e "${GREEN}   INSTALLATION COMPLETE!   ${NC}"
+echo -e "${GREEN}   INSTALLATION COMPLETE!${NC}"
 echo "========================================================"
 
 if [ "$REBOOT_REQUIRED" -eq 1 ]; then
-    echo -e "${YELLOW}IMPORTANT: A system reboot is strictly required to activate the I2C hardware bus.${NC}"
-    echo -e "Please run the following command to reboot now: ${CYAN}reboot${NC}"
+    echo -e "${YELLOW}IMPORTANT: Reboot required for I2C. Run: ${CYAN}reboot${NC}"
+else
+    echo -e "Web UI: ${CYAN}LuCI -> Services -> Argon ONE V3 Fan${NC}"
 fi
