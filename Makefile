@@ -7,7 +7,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-argononev3-fancontrol
-PKG_VERSION:=3.0.0
+PKG_VERSION:=3.0.1
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=ciwga
@@ -100,12 +100,13 @@ define Package/luci-app-argononev3-fancontrol/postrm
 	killall -9 argon_update.sh 2>/dev/null || true
 	rm -f /etc/config/argononev3
 	rm -f /etc/config/argononev3-opkg
+	rm -f /etc/config/argononev3.apk-new
 	rm -f /etc/config/argononev3.bak
 	rm -f /etc/argon_version
 	rm -f /var/run/argon_fan.status /var/run/argon_fan.status.tmp
 	rm -f /var/run/argon_fan.lock/pid
 	rmdir /var/run/argon_fan.lock 2>/dev/null || true
-	rm -f /tmp/argon_update.ipk /tmp/argon_update_install.log /tmp/argononev3_latest.ipk
+	rm -f /tmp/argon_update.* /tmp/argon_update_install.log /tmp/argononev3_latest.*
 	rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null || true
 	/etc/init.d/rpcd restart >/dev/null 2>&1 || true
 	exit 0
