@@ -2,18 +2,17 @@
 
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05+-blue.svg)
 ![Platform](https://img.shields.io/badge/Platform-Raspberry%20Pi%205-red.svg)
-![Version](https://img.shields.io/badge/Version-3.0.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-3.0.1-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 A professional, production-grade LuCI interface and lightweight background daemon for managing the Argon ONE V3 cooling fan natively on OpenWrt.
 
-## 🚀 What's New in v3.0.0
-* **Smart UI Dashboard**: Now includes a real-time sparkline graph for temperature trends, daemon uptime tracking, and peak temperature recording.
-* **Quick Cooling Presets**: Instantly apply optimized fan curves with one click (*Silent, Balanced, Performance*).
-* **Config Import/Export**: Easily backup or share your custom fan curves and settings as a JSON file.
-* **Hardware Fan Test**: A dedicated diagnostic button to safely spin the fan at 100% for 3 seconds via SIGUSR1 signals.
-* **Smart OTA Updater**: The built-in updater now compares versions and prevents redundant installations, displaying real-time upgrade status.
-* **I2C Auto-Recovery & True Poweroff**: Daemon now automatically recovers from I2C bus lockups and guarantees the fan completely turns off (`0x00`) during system halts.
+## 🚀 What's New in v3.0.1
+* **Universal OpenWrt Support:** Fully compatible with both modern OpenWrt 25.12+ (`apk` package manager) and legacy OpenWrt 24.10 (`opkg`).
+* **Dual-Architecture OTA Updates:** The built-in smart updater now automatically detects your system's package manager and seamlessly downloads the correct format (`.apk` or `.ipk`) without user intervention.
+* **Smart One-Liner Installer:** The `install.sh` script has been rewritten to dynamically adapt to the target system, safely handling dependencies and format requirements on the fly.
+* **Automated Dual-Build CI/CD:** GitHub Actions workflow now natively cross-compiles against both OpenWrt 24.10 and 25.12 SDKs, attaching both verified assets to every release.
+* *(Includes all v3.0.0 features: Smart UI Dashboard, Quick Cooling Presets, Config Import/Export, Hardware Fan Test, and I2C Auto-Recovery).*
 
 ## ✨ Core Features
 
@@ -36,16 +35,36 @@ wget -qO - https://raw.githubusercontent.com/ciwga/luci-app-argononev3-fancontro
 *Note: A system reboot is required after the first installation to activate the I2C bus.*
 
 ### Option 2: Manual Installation
+
+If you prefer to install manually, follow the specific commands for your OpenWrt version:
+
 1. Enable I2C by adding `dtparam=i2c_arm=on` to your `/boot/config.txt` and **reboot**.
-2. Install the hardware dependency:
-   ```bash
-   opkg update && opkg install i2c-tools
-   ```
-3. Download the latest `.ipk` from the [Releases](https://github.com/ciwga/luci-app-argononev3-fancontrol/releases) page.
-4. Upload to your router and install:
-   ```bash
-   opkg install /tmp/luci-app-argononev3-fancontrol_*.ipk
-   ```
+
+2. Download the correct package from the [Releases](https://github.com/ciwga/luci-app-argononev3-fancontrol/releases) page and upload it to your router's `/tmp/` folder:
+
+   * **OpenWrt 25.12+:** Download the `.apk` file.
+
+   * **OpenWrt 24.10:** Download the `.ipk` file.
+
+3. Install the hardware dependency and the package:
+
+**For Modern OpenWrt (25.12+) using `apk`:**
+
+```
+apk update
+apk add i2c-tools
+apk add --force-broken-world /tmp/luci-app-argononev3-fancontrol*.apk
+
+```
+
+**For Legacy OpenWrt (24.10) using `opkg`:**
+
+```
+opkg update
+opkg install i2c-tools
+opkg install --force-maintainer --force-overwrite /tmp/luci-app-argononev3-fancontrol*.ipk
+
+```
 
 ## ⚙️ Configuration
 
