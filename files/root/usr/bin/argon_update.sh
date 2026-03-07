@@ -6,6 +6,8 @@
 # AUTHOR: ciwga
 #
 # Exit codes: 0 = updated, 1 = error, 2 = already up-to-date
+#
+# DYNAMIC: Auto-detects 'apk' (OpenWrt 25.12+) vs 'opkg' (Legacy).
 # ==============================================================================
 
 set -u
@@ -22,6 +24,17 @@ readonly REPO_NAME="luci-app-argononev3-fancontrol"
 readonly API_URL="https://api.github.com/repos/$REPO_USER/$REPO_NAME/releases/latest"
 readonly VERSION_FILE="/etc/argon_version"
 
+# Step 0: Detect Package Manager (apk vs opkg)
+if command -v apk >/dev/null 2>&1; then
+    PKG_EXT="apk"
+    INSTALL_CMD="apk add --force-broken-world --force-refresh --reinstall"
+    log_msg "Detected Modern OpenWrt (apk package manager)."
+else
+    PKG_EXT="ipk"
+    INSTALL_CMD="opkg install --force-maintainer --force-overwrite --force-reinstall"
+    log_msg "Detected Legacy OpenWrt (opkg package manager)."
+fi
+
 # Step 1: Read installed version from /etc/argon_version
 INSTALLED_VERSION="unknown"
 if [ -r "$VERSION_FILE" ]; then
@@ -37,11 +50,12 @@ RELEASE_JSON=$(wget -qO- "$API_URL" 2>/dev/null) || {
     exit 1
 }
 
-DOWNLOAD_URL=$(echo "$RELEASE_JSON" | sed -n 's/.*"browser_download_url": *"\([^"]*\.ipk\)".*/\1/p' | head -n 1)
+# Dynamically extract URL based on the detected package extension (.apk or .ipk)
+DOWNLOAD_URL=$(echo "$RELEASE_JSON" | sed -n 's/.*"browser_download_url": *"\([^"]*\.'$PKG_EXT'\)".*/\1/p' | head -n 1)
 REMOTE_TAG=$(echo "$RELEASE_JSON" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
-    log_err "No .ipk found in latest release."
+    log_err "No .$PKG_EXT found in latest release."
     exit 1
 fi
 
@@ -64,25 +78,25 @@ if [ "$INSTALLED_VERSION" != "unknown" ] && [ "$REMOTE_TAG" != "unknown" ]; then
 fi
 
 # Step 4: Download and install
-readonly IPK_FILE="/tmp/argon_update.ipk"
+readonly PKG_FILE="/tmp/argon_update.$PKG_EXT"
 log_msg "Downloading: $DOWNLOAD_URL"
 
-if wget --no-check-certificate -q -O "$IPK_FILE" "$DOWNLOAD_URL"; then
+if wget --no-check-certificate -q -O "$PKG_FILE" "$DOWNLOAD_URL"; then
     log_msg "Installing..."
-    if opkg install --force-maintainer --force-overwrite --force-reinstall "$IPK_FILE" >/tmp/argon_update_install.log 2>&1; then
+    if $INSTALL_CMD "$PKG_FILE" >/tmp/argon_update_install.log 2>&1; then
         log_msg "Update complete."
-        rm -f "$IPK_FILE"
+        rm -f "$PKG_FILE"
         sleep 2
         /etc/init.d/argon_daemon restart || true
         log_msg "Daemon restarted."
         exit 0
     else
-        log_err "opkg failed. See /tmp/argon_update_install.log"
-        rm -f "$IPK_FILE"
+        log_err "Package manager failed. See /tmp/argon_update_install.log"
+        rm -f "$PKG_FILE"
         exit 1
     fi
 else
     log_err "Download failed."
-    rm -f "$IPK_FILE"
+    rm -f "$PKG_FILE"
     exit 1
 fi
