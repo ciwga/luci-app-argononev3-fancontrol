@@ -1,10 +1,22 @@
 # ==============================================================================
 # FILE: .github/workflows/build.yml
-# DESCRIPTION: OpenWrt IPK Automated Build & Release Pipeline for Argon ONE V3
+# DESCRIPTION: OpenWrt Dual-Package Automated Build & Release Pipeline
 # AUTHOR: ciwga
+#
+# HOW IT WORKS:
+#   1. Every push to main triggers a build.
+#   2. Version is extracted from Makefile (PKG_VERSION / PKG_RELEASE).
+#   3. If a GitHub Release with that version tag doesn't exist yet,
+#      the pipeline creates the tag, creates the release, and attaches BOTH 
+#      the legacy .ipk (OpenWrt 24.10) and the modern .apk (OpenWrt 25.12).
+#   4. If the tag already exists, only the build artifacts are uploaded.
+#
+# NO MANUAL TAGGING NEEDED. NO EXTRA SECRETS NEEDED.
+#   - ${{ github.token }} is auto-provided by GitHub Actions.
+#   - permissions: contents: write grants tag creation + release rights.
 # ==============================================================================
 
-name: Build OpenWrt IPK (RPi 5 - ArgonONE v3 Fan Control)
+name: Build OpenWrt Packages (RPi 5 - ArgonONE v3 Fan Control)
 
 on:
   push:
@@ -17,10 +29,11 @@ permissions:
 
 jobs:
   build:
-    name: Build OpenWrt IPK
+    name: Build IPK & APK
     runs-on: ubuntu-22.04
 
     steps:
+      # Checkout with token so we can push tags back
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -40,6 +53,7 @@ jobs:
           echo "full_version=${PKG_VER}-${PKG_REL}" >> "$GITHUB_OUTPUT"
           echo "Detected version: ${PKG_VER}-${PKG_REL}"
 
+      # Check if this version was already released (idempotent)
       - name: Check if Release Already Exists
         id: check_release
         run: |
@@ -63,55 +77,81 @@ jobs:
           gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
           python3-setuptools rsync unzip zlib1g-dev file wget zstd
 
-      - name: Download and Extract OpenWrt SDK
+      - name: Prepare Release Assets Directory
+        run: mkdir -p release_assets
+
+      # --- BUILD LEGACY (.ipk) for OpenWrt 24.10 ---
+      - name: Build Legacy IPK (OpenWrt 24.10)
         run: |
           SDK_URL="https://downloads.openwrt.org/releases/24.10.5/targets/bcm27xx/bcm2712/openwrt-sdk-24.10.5-bcm27xx-bcm2712_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
-          wget -qO sdk.tar.zst "$SDK_URL"
-          tar -I zstd -xf sdk.tar.zst
-          mv openwrt-sdk-* openwrt_sdk
-
-      - name: Air-Gapped Package Injection
-        run: |
+          wget -qO sdk_24.tar.zst "$SDK_URL"
+          tar -I zstd -xf sdk_24.tar.zst
+          mv openwrt-sdk-24.10.5-* openwrt_sdk_24
+          
           sed -i 's/DEPENDS:=.*/DEPENDS:=@TARGET_bcm27xx_bcm2712/g' source_code/Makefile
-          mkdir -p openwrt_sdk/package/luci-app-argononev3-fancontrol
-          cp -r source_code/* openwrt_sdk/package/luci-app-argononev3-fancontrol/
-
-      - name: Compile Package
-        run: |
-          cd openwrt_sdk
+          mkdir -p openwrt_sdk_24/package/luci-app-argononev3-fancontrol
+          cp -r source_code/* openwrt_sdk_24/package/luci-app-argononev3-fancontrol/
+          
+          cd openwrt_sdk_24
           rm -f .config
           touch .config
           echo "CONFIG_PACKAGE_luci-app-argononev3-fancontrol=m" >> .config
           make defconfig
           make package/luci-app-argononev3-fancontrol/compile V=s
+          
+          IPK_PATH=$(find bin/ -name 'luci-app-argononev3-fancontrol*.ipk' -type f | head -n 1)
+          if [ -z "$IPK_PATH" ]; then echo "ERROR: No .ipk file found!"; exit 1; fi
+          cp "$IPK_PATH" ../release_assets/
+          cd ..
+          # Clean up to save runner disk space
+          rm -rf openwrt_sdk_24 sdk_24.tar.zst
 
-      - name: Locate Built IPK
-        id: find_ipk
+      # --- BUILD MODERN (.apk) for OpenWrt 25.12 ---
+      - name: Build Modern APK (OpenWrt 25.12)
         run: |
-          IPK_PATH=$(find openwrt_sdk/bin/packages/ -name 'luci-app-argononev3-fancontrol_*.ipk' -type f | head -n 1)
-          if [ -z "$IPK_PATH" ]; then
-            echo "ERROR: No .ipk file found!"
-            exit 1
-          fi
-          echo "ipk_path=$IPK_PATH" >> "$GITHUB_OUTPUT"
-          echo "ipk_name=$(basename "$IPK_PATH")" >> "$GITHUB_OUTPUT"
-          echo "Built: $(basename "$IPK_PATH")"
+          SDK_URL="https://downloads.openwrt.org/releases/25.12.0/targets/bcm27xx/bcm2712/openwrt-sdk-25.12.0-bcm27xx-bcm2712_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
+          wget -qO sdk_25.tar.zst "$SDK_URL"
+          tar -I zstd -xf sdk_25.tar.zst
+          mv openwrt-sdk-25.12.0-* openwrt_sdk_25
+          
+          sed -i 's/DEPENDS:=.*/DEPENDS:=@TARGET_bcm27xx_bcm2712/g' source_code/Makefile
+          mkdir -p openwrt_sdk_25/package/luci-app-argononev3-fancontrol
+          cp -r source_code/* openwrt_sdk_25/package/luci-app-argononev3-fancontrol/
+          
+          cd openwrt_sdk_25
+          rm -f .config
+          touch .config
+          echo "CONFIG_USE_APK=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-argononev3-fancontrol=m" >> .config
+          make defconfig
+          make package/luci-app-argononev3-fancontrol/compile V=s
+          
+          APK_PATH=$(find bin/ -name 'luci-app-argononev3-fancontrol*.apk' -type f | head -n 1)
+          if [ -z "$APK_PATH" ]; then echo "ERROR: No .apk file found!"; exit 1; fi
+          cp "$APK_PATH" ../release_assets/
+          cd ..
+          # Clean up to save runner disk space
+          rm -rf openwrt_sdk_25 sdk_25.tar.zst
 
-      - name: Generate Checksum
+      # Generate SHA256 checksums for OTA integrity verification
+      - name: Generate Checksums
         id: checksum
         if: steps.check_release.outputs.exists == 'false'
         run: |
-          SHA=$(sha256sum "${{ steps.find_ipk.outputs.ipk_path }}" | cut -d' ' -f1)
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256: $SHA"
+          cd release_assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+          echo "sha256_ipk=$(grep '\.ipk$' checksums.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha256_apk=$(grep '\.apk$' checksums.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Upload IPK Artifact
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-argononev3-fancontrol-rpi5
-          path: ${{ steps.find_ipk.outputs.ipk_path }}
+          name: luci-app-argononev3-fancontrol-packages
+          path: release_assets/*
           retention-days: 7
 
+      # Create git tag (uses checkout token which has push permission)
       - name: Create Git Tag
         if: steps.check_release.outputs.exists == 'false'
         run: |
@@ -121,6 +161,7 @@ jobs:
           git tag "${{ steps.version.outputs.tag_name }}" -m "Release ${{ steps.version.outputs.tag_name }}"
           git push origin "${{ steps.version.outputs.tag_name }}"
 
+      # Create GitHub Release with both .ipk and .apk assets
       - name: Create GitHub Release
         if: steps.check_release.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
@@ -132,20 +173,28 @@ jobs:
             ## Argon ONE V3 Fan Control — ${{ steps.version.outputs.tag_name }}
 
             **Full version:** `${{ steps.version.outputs.full_version }}`
-            **SHA256:** `${{ steps.checksum.outputs.sha256 }}`
+            
+            ### Dual Support (Universal)
+            This release includes native packages for both legacy and modern OpenWrt versions. The installer automatically detects your system and installs the correct format:
+            - `OpenWrt 25.12+`: Modern `.apk` format
+            - `OpenWrt 24.10`: Legacy `.ipk` format
 
             ### Quick Install (SSH)
-            ```
+            ```bash
             wget -qO - https://raw.githubusercontent.com/ciwga/luci-app-argononev3-fancontrol/main/install.sh | sh
             ```
 
             ### Upgrade
             Use **LuCI → Services → Argon ONE V3 Fan → About & Updates → Check for Updates**
 
+            ### Checksums (SHA256)
+            - `.ipk`: `${{ steps.checksum.outputs.sha256_ipk }}`
+            - `.apk`: `${{ steps.checksum.outputs.sha256_apk }}`
+
             ### Build Info
             - **Commit:** `${{ github.sha }}`
-            - **SDK:** OpenWrt 24.10.5 bcm27xx/bcm2712
+            - **SDKs:** OpenWrt 24.10.5 & 25.12.0
             - **Arch:** aarch64_cortex-a76 (Raspberry Pi 5)
-          files: ${{ steps.find_ipk.outputs.ipk_path }}
+          files: release_assets/*
           draft: false
           prerelease: false
