@@ -3,23 +3,14 @@
 # ==============================================================================
 # Argon ONE V3 Fan Control Automated Installer for OpenWrt (Raspberry Pi 5)
 # Author: ciwga
-# Description: Automatically installs i2c-tools, enables I2C in boot config, 
-#              fetches the latest .ipk release from GitHub, and sets up the daemon.
+#
+# Description: Universal installer supporting both legacy opkg and modern apk.
 # ==============================================================================
 
-# ------------------------------------------------------------------------------
-# CONFIGURATION
-# ------------------------------------------------------------------------------
 REPO_USER="ciwga"
 REPO_NAME="luci-app-argononev3-fancontrol"
 
-# Colors for terminal output
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
@@ -31,7 +22,7 @@ echo "   OpenWrt / Raspberry Pi 5                             "
 echo "========================================================"
 
 if [ "$(id -u)" -ne 0 ]; then
-    log_err "This script must be run as root. Please log in as root and try again."
+    log_err "This script must be run as root."
     exit 1
 fi
 
@@ -51,8 +42,8 @@ killall -9 argon_update.sh 2>/dev/null || true
 
 rm -f /var/run/argon_fan.status /var/run/argon_fan.status.tmp /var/run/argon_fan.lock/pid 2>/dev/null || true
 rmdir /var/run/argon_fan.lock 2>/dev/null || true
-rm -f /etc/argon_version /tmp/argon_update.ipk /tmp/argononev3_latest.ipk /tmp/argon_update_install.log 2>/dev/null || true
-rm -f /etc/config/argononev3-opkg /etc/config/argononev3.bak 2>/dev/null || true
+rm -f /etc/argon_version /tmp/argon_update.* /tmp/argononev3_latest.* /tmp/argon_update_install.log 2>/dev/null || true
+rm -f /etc/config/argononev3-opkg /etc/config/argononev3.apk-new /etc/config/argononev3.bak 2>/dev/null || true
 rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null || true
 
 # Fan off during upgrade window
@@ -69,45 +60,70 @@ done
 log_info "Cleanup complete."
 
 # ==============================================================================
+# PACKAGE MANAGER DETECTION
+# ==============================================================================
+if command -v apk >/dev/null 2>&1; then
+    PKG_MGR="apk"
+    PKG_EXT="apk"
+    INSTALL_CMD="apk add --force-broken-world"
+    log_info "Detected modern OpenWrt with apk package manager."
+else
+    PKG_MGR="opkg"
+    PKG_EXT="ipk"
+    INSTALL_CMD="opkg install --force-maintainer --force-overwrite"
+    log_info "Detected legacy OpenWrt with opkg package manager."
+fi
+
+# ==============================================================================
 # STEP 1: DEPENDENCIES
 # ==============================================================================
 log_step "Step 1: Installing Dependencies"
-opkg update >/dev/null 2>&1
 
-if opkg install i2c-tools; then
-    log_info "'i2c-tools' ready."
+if [ "$PKG_MGR" = "apk" ]; then
+    apk update >/dev/null 2>&1
+    if apk add i2c-tools; then
+        log_info "'i2c-tools' ready."
+    else
+        log_err "Failed to install 'i2c-tools'."
+        exit 1
+    fi
 else
-    log_err "Failed to install 'i2c-tools'."
-    exit 1
+    opkg update >/dev/null 2>&1
+    if opkg install i2c-tools; then
+        log_info "'i2c-tools' ready."
+    else
+        log_err "Failed to install 'i2c-tools'."
+        exit 1
+    fi
 fi
 
 # ==============================================================================
 # STEP 2: DOWNLOAD & INSTALL PACKAGE
 # ==============================================================================
-log_step "Step 2: Downloading Latest Package"
+log_step "Step 2: Downloading Latest Package ($PKG_EXT)"
 
 API_URL="https://api.github.com/repos/$REPO_USER/$REPO_NAME/releases/latest"
 RELEASE_JSON=$(wget -qO- "$API_URL" 2>/dev/null) || { log_err "GitHub API unreachable."; exit 1; }
 
-DOWNLOAD_URL=$(echo "$RELEASE_JSON" | sed -n 's/.*"browser_download_url": *"\([^"]*\.ipk\)".*/\1/p' | head -n 1)
+DOWNLOAD_URL=$(echo "$RELEASE_JSON" | sed -n 's/.*"browser_download_url": *"\([^"]*\.'$PKG_EXT'\)".*/\1/p' | head -n 1)
 REMOTE_TAG=$(echo "$RELEASE_JSON" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)
 
 if [ -z "$DOWNLOAD_URL" ]; then
-    log_err "No .ipk found in latest release."
+    log_err "No .$PKG_EXT found in latest release."
     exit 1
 fi
 
 log_info "Latest: ${REMOTE_TAG:-unknown}"
-IPK_FILE="/tmp/argononev3_latest.ipk"
+PKG_FILE="/tmp/argononev3_latest.$PKG_EXT"
 
-if wget --no-check-certificate -q -O "$IPK_FILE" "$DOWNLOAD_URL"; then
+if wget --no-check-certificate -q -O "$PKG_FILE" "$DOWNLOAD_URL"; then
     log_info "Download complete."
-    if opkg install --force-maintainer --force-overwrite "$IPK_FILE"; then
-        log_info "Package installed."
+    if $INSTALL_CMD "$PKG_FILE"; then
+        log_info "Package installed successfully."
     else
-        log_err "Installation failed."; rm -f "$IPK_FILE"; exit 1
+        log_err "Installation failed."; rm -f "$PKG_FILE"; exit 1
     fi
-    rm -f "$IPK_FILE"
+    rm -f "$PKG_FILE"
 else
     log_err "Download failed."; exit 1
 fi
