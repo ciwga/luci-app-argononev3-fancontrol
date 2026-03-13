@@ -25,9 +25,33 @@ function formatUptime(s) {
     return sec + 's';
 }
 
-// Fixed-size ring buffer for sparkline (20 samples, ~60s at 3s poll)
-var _tHist = [], _tMax = 20;
-function pushTemp(t) { _tHist.push(t); if (_tHist.length > _tMax) _tHist.shift(); }
+// ==============================================================================
+// Sparkline ring buffer — persisted in localStorage so history survives page
+// refreshes. Key is scoped to this page to avoid collisions with other LuCI apps.
+// Max 120 samples = 6 minutes of history at 3s poll interval.
+// ==============================================================================
+var _tMax = 120;
+var _LS_KEY = 'argononev3_temp_hist';
+
+var _tHist = (function() {
+    try {
+        var stored = localStorage.getItem(_LS_KEY);
+        if (stored) {
+            var arr = JSON.parse(stored);
+            if (Array.isArray(arr)) {
+                // Keep only the last _tMax entries in case the stored array grew
+                return arr.slice(-_tMax);
+            }
+        }
+    } catch(e) {}
+    return [];
+})();
+
+function pushTemp(t) {
+    _tHist.push(t);
+    if (_tHist.length > _tMax) _tHist.shift();
+    try { localStorage.setItem(_LS_KEY, JSON.stringify(_tHist)); } catch(e) {}
+}
 
 function sparkSvg(data) {
     if (!data || data.length < 2) return '';
@@ -83,6 +107,7 @@ return view.extend({
             '<div style="background:#1e293b;color:#f8fafc;border-left:5px solid #3b82f6;padding:18px;margin-bottom:25px;border-radius:6px;box-shadow:0 4px 6px rgba(0,0,0,0.3);font-family:sans-serif;">' +
                 '<h4 style="margin-top:0;color:#f8fafc;font-weight:bold;border-bottom:1px solid #334155;padding-bottom:10px;">' +
                     'Live Telemetry <span id="argon_spin" style="font-size:13px;color:#ef4444;margin-left:10px;text-shadow:0 0 8px rgba(239,68,68,0.6);">&#9679; Live</span>' +
+                    '<span id="argon_poll_rate" style="font-size:11px;color:#475569;margin-left:8px;"></span>' +
                 '</h4>' +
                 '<table style="width:100%;max-width:550px;font-size:14px;margin-top:10px;">' +
                     '<tr><td style="padding:5px 0;color:#94a3b8;width:45%;"><b>Service Status:</b></td><td style="padding:5px 0;" id="argon_status">...</td></tr>' +
@@ -536,7 +561,7 @@ return view.extend({
                     var dBus = tData.i2c_bus || '';
                     var dNightEnd = tData.night_end || '';
 
-                    if (dTemp > 0) pushTemp(dTemp);
+                    if (dTemp > 0) { _lastTemp = dTemp; pushTemp(dTemp); }
 
                     // Fan speed label
                     var lText = '<span style="color:#64748b;">N/A</span>';
@@ -592,17 +617,79 @@ return view.extend({
                             ? '<span style="color:#e2e8f0;">/dev/i2c-' + dBus + '</span> <span style="color:#64748b;font-size:12px;">(0x1a)</span>'
                             : '<span style="color:#64748b;">' + (isRun ? 'Detecting...' : 'Offline') + '</span>';
                     }
+
+                    // Poll rate indicator
+                    var prEl = el('argon_poll_rate');
+                    if (prEl) {
+                        var ms = getPollInterval();
+                        prEl.textContent = '(' + (ms / 1000) + 's)';
+                    }
                 });
             };
 
-            var intervalId = window.setInterval(function() {
-                if (!document.getElementById('argon_status')) {
-                    window.clearInterval(intervalId);
-                    _tHist = [];
-                    return;
+            // ==============================================================
+            // LIVE DASHBOARD POLLER
+            //
+            // Dynamic interval:
+            //   - Critical zone (temp >= 75°C) → 1s  (fast response)
+            //   - Elevated zone (temp >= 55°C)  → 3s  (normal watch)
+            //   - Stable zone   (temp <  55°C)  → 5s  (save CPU/power)
+            //
+            // Visibility API: polling is suspended while the tab is hidden
+            // and resumes immediately when the tab becomes visible again.
+            // This avoids useless RPC calls draining router CPU in background.
+            // ==============================================================
+            var _lastTemp = 0;
+            var _pollTimer = null;
+            var _paused = false;
+
+            function getPollInterval() {
+                if (_lastTemp >= 75) return 1000;
+                if (_lastTemp >= 55) return 3000;
+                return 5000;
+            }
+
+            function schedulePoll() {
+                if (_pollTimer !== null) return; // already scheduled
+                _pollTimer = window.setTimeout(function() {
+                    _pollTimer = null;
+                    if (!document.getElementById('argon_status')) {
+                        // Node removed from DOM — view was navigated away
+                        _tHist = [];
+                        try { localStorage.removeItem(_LS_KEY); } catch(e) {}
+                        return;
+                    }
+                    if (!_paused) {
+                        updateDashboard();
+                        schedulePoll();
+                    }
+                }, getPollInterval());
+            }
+
+            function handleVisibilityChange() {
+                var spinEl = document.getElementById('argon_spin');
+                if (document.hidden) {
+                    _paused = true;
+                    if (spinEl) { spinEl.style.color = '#475569'; spinEl.style.textShadow = 'none'; spinEl.innerHTML = '&#9679; Paused'; }
+                    // Cancel any pending timer to avoid a spurious call on resume
+                    if (_pollTimer !== null) {
+                        window.clearTimeout(_pollTimer);
+                        _pollTimer = null;
+                    }
+                } else {
+                    _paused = false;
+                    if (spinEl) { spinEl.style.color = '#ef4444'; spinEl.style.textShadow = '0 0 8px rgba(239,68,68,0.6)'; spinEl.innerHTML = '&#9679; Live'; }
+                    // Poll immediately on tab focus so the dashboard isn't stale
+                    updateDashboard();
+                    schedulePoll();
                 }
-                updateDashboard();
-            }, 3000);
+            }
+
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+
+            // Initial poll + start scheduler
+            updateDashboard();
+            schedulePoll();
         });
 
         return renderPromise;
