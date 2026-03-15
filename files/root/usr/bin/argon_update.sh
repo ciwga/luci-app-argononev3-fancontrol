@@ -4,9 +4,11 @@
 # FILE: /usr/bin/argon_update.sh
 # DESCRIPTION: Secure OTA Updater for Argon ONE V3 Fan Control
 # AUTHOR: ciwga
+# VERSION: 3.1.0
 #
 # Exit codes: 0 = updated, 1 = error, 2 = already up-to-date
 #
+# SECURITY: Takes no arguments. All input sanitized. No eval/exec on user data.
 # DYNAMIC: Auto-detects 'apk' (OpenWrt 25.12+) vs 'opkg' (Legacy).
 # ==============================================================================
 
@@ -27,7 +29,7 @@ readonly VERSION_FILE="/etc/argon_version"
 # Step 0: Detect Package Manager (apk vs opkg)
 if command -v apk >/dev/null 2>&1; then
     PKG_EXT="apk"
-    INSTALL_CMD="apk add --force-broken-world --force-refresh --reinstall"
+    INSTALL_CMD="apk add --force-broken-world --force-refresh --reinstall --allow-untrusted"
     log_msg "Detected Modern OpenWrt (apk package manager)."
 else
     PKG_EXT="ipk"

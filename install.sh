@@ -3,7 +3,7 @@
 # ==============================================================================
 # Argon ONE V3 Fan Control Automated Installer for OpenWrt (Raspberry Pi 5)
 # Author: ciwga
-#
+# Version: 3.1.0
 # Description: Universal installer supporting both legacy opkg and modern apk.
 # ==============================================================================
 
@@ -17,7 +17,7 @@ log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${CYAN}>>> $1${NC}"; }
 
 echo "========================================================"
-echo "   Argon ONE V3 Fan Control Installer                   "
+echo "   Argon ONE V3 Fan Control Installer v2.1.1            "
 echo "   OpenWrt / Raspberry Pi 5                             "
 echo "========================================================"
 
@@ -43,7 +43,7 @@ killall -9 argon_update.sh 2>/dev/null || true
 rm -f /var/run/argon_fan.status /var/run/argon_fan.status.tmp /var/run/argon_fan.lock/pid 2>/dev/null || true
 rmdir /var/run/argon_fan.lock 2>/dev/null || true
 rm -f /etc/argon_version /tmp/argon_update.* /tmp/argononev3_latest.* /tmp/argon_update_install.log 2>/dev/null || true
-rm -f /etc/config/argononev3-opkg /etc/config/argononev3.apk-new /etc/config/argononev3.bak 2>/dev/null || true
+rm -f /etc/config/argononev3-opkg /etc/config/argononev3.bak 2>/dev/null || true
 rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null || true
 
 # Fan off during upgrade window
@@ -65,7 +65,7 @@ log_info "Cleanup complete."
 if command -v apk >/dev/null 2>&1; then
     PKG_MGR="apk"
     PKG_EXT="apk"
-    INSTALL_CMD="apk add --force-broken-world"
+    INSTALL_CMD="apk add --force-broken-world --allow-untrusted"
     log_info "Detected modern OpenWrt with apk package manager."
 else
     PKG_MGR="opkg"
