@@ -4,7 +4,7 @@
 # FILE: /usr/bin/argon_update.sh
 # DESCRIPTION: Secure OTA Updater for Argon ONE V3 Fan Control
 # AUTHOR: ciwga
-# VERSION: 3.1.0
+# VERSION: 3.1.1
 #
 # Exit codes: 0 = updated, 1 = error, 2 = already up-to-date
 #

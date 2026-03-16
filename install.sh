@@ -3,7 +3,7 @@
 # ==============================================================================
 # Argon ONE V3 Fan Control Automated Installer for OpenWrt (Raspberry Pi 5)
 # Author: ciwga
-# Version: 3.1.0
+# Version: 3.1.1
 # Description: Universal installer supporting both legacy opkg and modern apk.
 # ==============================================================================
 
@@ -17,7 +17,7 @@ log_err()  { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step() { echo -e "${CYAN}>>> $1${NC}"; }
 
 echo "========================================================"
-echo "   Argon ONE V3 Fan Control Installer v2.1.1            "
+echo "   Argon ONE V3 Fan Control Installer v3.1.1            "
 echo "   OpenWrt / Raspberry Pi 5                             "
 echo "========================================================"
 
